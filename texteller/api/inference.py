@@ -215,8 +215,8 @@ def img2latex_v2(
     res = [format_latex(r) for r in res]
     res = [add_newlines(r) for r in res]
     return [
-        { "res": res, "confidence": con }
-        for res, con in zip(res, confidence.cpu().tolist(), strict=True)
+        {"res": r, "confidence": con}
+        for r, con in zip(res, confidence.cpu().tolist(), strict=True)
     ]
 
 
