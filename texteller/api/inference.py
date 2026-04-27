@@ -1,7 +1,7 @@
 import re
 import time
 from collections import Counter
-from typing import Literal
+from typing import Literal, TypedDict
 
 import cv2
 import numpy as np
@@ -32,6 +32,11 @@ from .format import format_latex
 from .katex import to_katex
 
 _logger = get_logger()
+
+
+class InferenceResult(TypedDict):
+    res: str
+    confidence: float
 
 
 def img2latex(
@@ -72,54 +77,18 @@ def img2latex(
         >>>
         >>> res = img2latex(model, tokenizer, ["path/to/image.png"], device=device, out_format="katex")
     """
-    assert isinstance(images, list)
-    assert len(images) > 0
-
-    if device is None:
-        device = get_device()
-
-    if device.type != model.device.type:
-        if isinstance(model, ORTModelForVision2Seq):
-            _logger.warning(
-                f"Onnxruntime device mismatch: detected {str(device)} but model is on {str(model.device)}, using {str(model.device)} instead"
-            )
-        else:
-            model = model.to(device=device)
-
-    if isinstance(images[0], str):
-        images = readimgs(images)
-    else:  # already numpy array(rgb format)
-        assert isinstance(images[0], np.ndarray)
-        images = images
-
-    images = transform(images)
-    pixel_values = torch.stack(images)
-
-    generate_config = GenerationConfig(
-        max_new_tokens=max_tokens,
+    res = img2latex_v2(
+        model=model,
+        tokenizer=tokenizer,
+        images=images,
+        device=device,
+        out_format=out_format,
+        keep_style=keep_style,
+        max_tokens=max_tokens,
         num_beams=num_beams,
-        do_sample=False,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        bos_token_id=tokenizer.bos_token_id,
         no_repeat_ngram_size=no_repeat_ngram_size,
     )
-    pred = model.generate(
-        pixel_values.to(model.device),
-        generation_config=generate_config,
-    )
-
-    res = tokenizer.batch_decode(pred, skip_special_tokens=True)
-
-    if out_format == "katex":
-        res = [to_katex(r) for r in res]
-
-    if not keep_style:
-        res = [remove_style(r) for r in res]
-
-    res = [format_latex(r) for r in res]
-    res = [add_newlines(r) for r in res]
-    return res
+    return [r["res"] for r in res]
 
 
 def img2latex_v2(
@@ -132,7 +101,7 @@ def img2latex_v2(
     max_tokens: int = MAX_TOKEN_SIZE,
     num_beams: int = 1,
     no_repeat_ngram_size: int = 0,
-):
+) -> list[InferenceResult]:
     """
     Convert images to LaTeX or KaTeX formatted strings.
 
@@ -148,7 +117,7 @@ def img2latex_v2(
         no_repeat_ngram_size: Size of n-grams to prevent repetition
 
     Returns:
-        Dict of LaTeX or KaTeX string and confidence corresponding to the input image
+        List of dicts of LaTeX or KaTeX string and confidence corresponding to the input images
 
     Example:
         >>> import torch
