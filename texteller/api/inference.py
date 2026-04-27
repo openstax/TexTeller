@@ -6,6 +6,7 @@ from typing import Literal
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from onnxruntime import InferenceSession
 from optimum.onnxruntime import ORTModelForVision2Seq
 from transformers import GenerationConfig, RobertaTokenizerFast
@@ -119,6 +120,104 @@ def img2latex(
     res = [format_latex(r) for r in res]
     res = [add_newlines(r) for r in res]
     return res
+
+
+def img2latex_v2(
+    model: TexTellerModel,
+    tokenizer: RobertaTokenizerFast,
+    images: list[str] | list[np.ndarray],
+    device: torch.device | None = None,
+    out_format: Literal["latex", "katex"] = "latex",
+    keep_style: bool = False,
+    max_tokens: int = MAX_TOKEN_SIZE,
+    num_beams: int = 1,
+    no_repeat_ngram_size: int = 0,
+):
+    """
+    Convert images to LaTeX or KaTeX formatted strings.
+
+    Args:
+        model: The TexTeller or ORTModelForVision2Seq model instance
+        tokenizer: The tokenizer for the model
+        images: List of image paths or numpy arrays (RGB format)
+        device: The torch device to use (defaults to available GPU or CPU)
+        out_format: Output format, either "latex" or "katex"
+        keep_style: Whether to keep the style of the LaTeX
+        max_tokens: Maximum number of tokens to generate
+        num_beams: Number of beams for beam search
+        no_repeat_ngram_size: Size of n-grams to prevent repetition
+
+    Returns:
+        Dict of LaTeX or KaTeX string and confidence corresponding to the input image
+
+    Example:
+        >>> import torch
+        >>> from texteller import load_model, load_tokenizer, img2latex
+        >>>
+        >>> model = load_model(model_path=None, use_onnx=False)
+        >>> tokenizer = load_tokenizer(tokenizer_path=None)
+        >>> device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        >>>
+        >>> res = img2latex(model, tokenizer, ["path/to/image.png"], device=device, out_format="katex")
+    """
+    assert isinstance(images, list)
+    assert len(images) > 0
+
+    if device is None:
+        device = get_device()
+
+    if device.type != model.device.type:
+        if isinstance(model, ORTModelForVision2Seq):
+            _logger.warning(
+                f"Onnxruntime device mismatch: detected {str(device)} but model is on {str(model.device)}, using {str(model.device)} instead"
+            )
+        else:
+            model = model.to(device=device)
+
+    if isinstance(images[0], str):
+        images = readimgs(images)
+    else:  # already numpy array(rgb format)
+        assert isinstance(images[0], np.ndarray)
+        images = images
+
+    images = transform(images)
+    pixel_values = torch.stack(images)
+
+    generate_config = GenerationConfig(
+        max_new_tokens=max_tokens,
+        num_beams=num_beams,
+        do_sample=False,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        no_repeat_ngram_size=no_repeat_ngram_size,
+    )
+    outputs = model.generate(
+        pixel_values.to(model.device),
+        generation_config=generate_config,
+        output_scores=True,
+        return_dict_in_generate=True,
+    )
+    pred = outputs.sequences
+    scores = outputs.scores
+    log_probs = torch.stack([F.log_softmax(s, dim=-1) for s in scores], dim=1)
+    token_ids = outputs.sequences[:, 1:log_probs.shape[1]+1]  # skip the decoder start token
+    confidence = log_probs.gather(2, token_ids.unsqueeze(-1)).squeeze(-1).mean(dim=-1).exp()
+
+    res = tokenizer.batch_decode(pred, skip_special_tokens=True)
+
+    if out_format == "katex":
+        res = [to_katex(r) for r in res]
+
+    if not keep_style:
+        res = [remove_style(r) for r in res]
+
+    res = [format_latex(r) for r in res]
+    res = [add_newlines(r) for r in res]
+    return [
+        { "res": res, "confidence": con }
+        for res, con in zip(res, confidence.cpu().tolist(), strict=True)
+    ]
 
 
 def paragraph2md(

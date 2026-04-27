@@ -1,6 +1,6 @@
 from .detection import latex_detect
 from .format import format_latex
-from .inference import img2latex, paragraph2md
+from .inference import img2latex, img2latex_v2, paragraph2md
 from .katex import to_katex
 from .load import (
     load_latexdet_model,
@@ -14,6 +14,7 @@ __all__ = [
     "to_katex",
     "format_latex",
     "img2latex",
+    "img2latex_v2",
     "paragraph2md",
     "load_model",
     "load_tokenizer",

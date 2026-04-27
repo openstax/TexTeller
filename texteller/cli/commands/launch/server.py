@@ -5,7 +5,7 @@ from starlette.requests import Request
 from ray import serve
 from ray.serve.handle import DeploymentHandle
 
-from texteller.api import load_model, load_tokenizer, img2latex
+from texteller.api import load_model, load_tokenizer, img2latex_v2
 from texteller.utils import get_device
 from texteller.globals import Globals
 from typing import Literal
@@ -40,8 +40,8 @@ class TexTellerServer:
         if not use_onnx:
             self.model = self.model.to(get_device())
 
-    def predict(self, image_nparray: np.ndarray) -> str:
-        return img2latex(
+    def predict(self, image_nparray: np.ndarray):
+        return img2latex_v2(
             model=self.model,
             tokenizer=self.tokenizer,
             images=[image_nparray],
